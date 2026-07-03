@@ -252,9 +252,9 @@ export const reservations = pgTable('reservations', {
   branchId: uuid('branch_id')
     .notNull()
     .references(() => branches.id, { onDelete: 'cascade' }),
-  tableId: uuid('table_id')
-    .notNull()
-    .references(() => restaurantTables.id, { onDelete: 'cascade' }),
+  tableId: uuid('table_id').references(() => restaurantTables.id, {
+    onDelete: 'cascade',
+  }), // nullable: waitlist entries have no table yet
   partySize: integer('party_size').notNull(),
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
   endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
@@ -266,3 +266,60 @@ export const reservations = pgTable('reservations', {
     .notNull()
     .defaultNow(),
 });
+
+// ─── Lifecycle: complaints + notifications (R1.9/R1.10) ──────────────────────
+
+export const complaints = pgTable('complaints', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  branchId: uuid('branch_id').references(() => branches.id, {
+    onDelete: 'set null',
+  }),
+  dinerPhone: text('diner_phone'),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  status: text('status').notNull().default('open'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const notifications = pgTable('notifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  recipient: text('recipient').notNull(),
+  channel: text('channel').notNull(),
+  event: text('event').notNull(),
+  body: text('body').notNull(),
+  dedupeKey: text('dedupe_key'),
+  status: text('status').notNull().default('sent'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const notificationOptouts = pgTable(
+  'notification_optouts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    recipient: text('recipient').notNull(),
+    channel: text('channel').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    uqOptout: unique('uq_notification_optouts').on(
+      t.tenantId,
+      t.recipient,
+      t.channel,
+    ),
+  }),
+);

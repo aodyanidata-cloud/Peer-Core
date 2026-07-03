@@ -6,12 +6,20 @@ import { TenancyService } from '../../modules/tenancy/tenancy.service';
 export class ReservationError extends Error {
   constructor(
     message: string,
-    readonly code: 'no_table' | 'over_capacity' | 'slot_taken',
+    readonly code:
+      | 'no_table'
+      | 'over_capacity'
+      | 'slot_taken'
+      | 'not_found'
+      | 'bad_status',
   ) {
     super(message);
     this.name = 'ReservationError';
   }
 }
+
+const TERMINAL_STATUS = ['seated', 'completed', 'no_show', 'cancelled'] as const;
+type TerminalStatus = (typeof TERMINAL_STATUS)[number];
 
 export interface BookInput {
   branchId: string;
@@ -136,5 +144,129 @@ export class ReservationService {
       }
       return null;
     });
+  }
+
+  // ── Lifecycle (R1.7) ────────────────────────────────────────────────────────
+
+  /** Cancel a reservation — frees its slot (excluded from the overlap constraint). */
+  cancel(tenantId: string, reservationId: string) {
+    return this.setStatus(tenantId, reservationId, 'cancelled');
+  }
+
+  /** Transition to seated / completed / no_show / cancelled. */
+  async setStatus(
+    tenantId: string,
+    reservationId: string,
+    status: TerminalStatus,
+  ) {
+    if (!TERMINAL_STATUS.includes(status)) {
+      throw new ReservationError(`invalid status ${status}`, 'bad_status');
+    }
+    return this.tenancy.runAs(tenantId, async (tx) => {
+      const [row] = await tx
+        .update(schema.reservations)
+        .set({ status })
+        .where(eq(schema.reservations.id, reservationId))
+        .returning();
+      if (!row) throw new ReservationError('no such reservation', 'not_found');
+      return row;
+    });
+  }
+
+  /** Move a booking to a new time/party; the exclusion constraint re-checks the new window. */
+  async modify(
+    tenantId: string,
+    reservationId: string,
+    change: { startsAt: Date; durationMin: number; partySize?: number },
+  ) {
+    const endsAt = new Date(
+      change.startsAt.getTime() + change.durationMin * 60_000,
+    );
+    return this.tenancy.runAs(tenantId, async (tx) => {
+      try {
+        const [row] = await tx
+          .update(schema.reservations)
+          .set({
+            startsAt: change.startsAt,
+            endsAt,
+            ...(change.partySize !== undefined
+              ? { partySize: change.partySize }
+              : {}),
+          })
+          .where(eq(schema.reservations.id, reservationId))
+          .returning();
+        if (!row) throw new ReservationError('no such reservation', 'not_found');
+        return row;
+      } catch (e) {
+        if ((e as { code?: string }).code === EXCLUSION_VIOLATION) {
+          throw new ReservationError('new time is already booked', 'slot_taken');
+        }
+        throw e;
+      }
+    });
+  }
+
+  // ── Waitlist (R1.7) ─────────────────────────────────────────────────────────
+
+  addToWaitlist(
+    tenantId: string,
+    input: Omit<BookInput, 'tableId'>,
+  ) {
+    const endsAt = new Date(
+      input.startsAt.getTime() + input.durationMin * 60_000,
+    );
+    return this.tenancy.runAs(tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(schema.reservations)
+        .values({
+          tenantId,
+          branchId: input.branchId,
+          tableId: null,
+          partySize: input.partySize,
+          startsAt: input.startsAt,
+          endsAt,
+          status: 'waitlisted',
+          dinerName: input.dinerName ?? null,
+          dinerPhone: input.dinerPhone ?? null,
+          notes: input.notes ?? null,
+        })
+        .returning();
+      return row;
+    });
+  }
+
+  /** Promote a waitlisted entry onto a table; the constraint guards the slot. */
+  async promoteFromWaitlist(
+    tenantId: string,
+    reservationId: string,
+    tableId: string,
+  ) {
+    return this.tenancy.runAs(tenantId, async (tx) => {
+      try {
+        const [row] = await tx
+          .update(schema.reservations)
+          .set({ tableId, status: 'confirmed' })
+          .where(eq(schema.reservations.id, reservationId))
+          .returning();
+        if (!row) throw new ReservationError('no such reservation', 'not_found');
+        return row;
+      } catch (e) {
+        if ((e as { code?: string }).code === EXCLUSION_VIOLATION) {
+          throw new ReservationError('table already booked', 'slot_taken');
+        }
+        throw e;
+      }
+    });
+  }
+
+  // ── Staff book view (R1.8) ──────────────────────────────────────────────────
+
+  listReservations(tenantId: string, branchId: string) {
+    return this.tenancy.runAs(tenantId, (tx) =>
+      tx
+        .select()
+        .from(schema.reservations)
+        .where(eq(schema.reservations.branchId, branchId)),
+    );
   }
 }

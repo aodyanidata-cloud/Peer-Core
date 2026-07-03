@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import swc from 'unplugin-swc';
 
 export default defineConfig({
+  // SWC emits decorator metadata (design:paramtypes) that esbuild does not, so
+  // NestJS constructor dependency injection resolves correctly in tests. Matches
+  // the production `nest build` (tsc, emitDecoratorMetadata) behaviour.
+  plugins: [swc.vite({ module: { type: 'es6' } })],
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
