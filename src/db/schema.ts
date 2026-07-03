@@ -5,6 +5,8 @@ import {
   jsonb,
   timestamp,
   integer,
+  boolean,
+  doublePrecision,
   unique,
 } from 'drizzle-orm/pg-core';
 
@@ -180,3 +182,60 @@ export const kbDocuments = pgTable('kb_documents', {
     .notNull()
     .defaultNow(),
 });
+
+// ─── Restaurants vertical (R1) ───────────────────────────────────────────────
+
+export const branches = pgTable('branches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  address: text('address'),
+  lat: doublePrecision('lat'),
+  lng: doublePrecision('lng'),
+  hours: jsonb('hours').notNull().default({}),
+  phone: text('phone'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const restaurantTables = pgTable('restaurant_tables', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  branchId: uuid('branch_id')
+    .notNull()
+    .references(() => branches.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  capacity: integer('capacity').notNull(),
+  area: text('area'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const menuAvailability = pgTable(
+  'menu_availability',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => catalogItems.id, { onDelete: 'cascade' }),
+    branchId: uuid('branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    available: boolean('available').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    uqItemBranch: unique('uq_menu_availability').on(t.itemId, t.branchId),
+  }),
+);

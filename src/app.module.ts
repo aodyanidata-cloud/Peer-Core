@@ -13,6 +13,9 @@ import { ToolDispatcherModule } from './modules/tool-dispatcher/tool-dispatcher.
 import { ChannelsModule } from './modules/channels/channels.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 
+// Vertical plug-in (depends on the engine; the engine never depends on it).
+import { RestaurantsModule } from './vertical/restaurants/restaurants.module';
+
 @Module({
   imports: [
     HealthModule,
@@ -24,6 +27,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     ToolDispatcherModule,
     ChannelsModule,
     NotificationsModule,
+    RestaurantsModule,
   ],
 })
 export class AppModule {}
