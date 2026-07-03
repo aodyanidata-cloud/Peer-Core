@@ -8,6 +8,27 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # App role is deliberately NON-superuser / NON-bypassrls so FORCE RLS is
+      # genuinely exercised by the tenant-isolation safety suite.
+      DATABASE_URL: postgres://app_user:app_pw@localhost:5432/peers_restaurants
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,6 +36,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+
+      - name: Provision app role + database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE app_user WITH LOGIN PASSWORD 'app_pw' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+          CREATE DATABASE peers_restaurants OWNER app_user;
+          SQL
+
+      - name: Migrate
+        run: npm run db:migrate
+
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
@@ -23,5 +57,5 @@ jobs:
         run: npm run build
       - name: Fitness functions (architecture guards)
         run: npm run fitness
-      - name: Tests (incl. safety suites)
+      - name: Tests (incl. 🔴 safety suites)
         run: npm test

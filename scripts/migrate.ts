@@ -1,20 +1,24 @@
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { getDb, closeDb } from '../src/db';
+import { Pool } from 'pg';
+import { applyMigrations } from '../src/db/migrate';
 
 /**
- * Apply Drizzle migrations from ./drizzle. No migrations exist at Stage A1
- * (the schema is intentionally empty until B1); this harness is here so the
- * migration path is wired and ready.
+ * Apply SQL migrations from ./drizzle to DATABASE_URL.
  */
 async function main(): Promise<void> {
-  const db = getDb();
-  await migrate(db, { migrationsFolder: './drizzle' });
-  console.log('migrations applied');
-  await closeDb();
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not set');
+  }
+  const pool = new Pool({ connectionString });
+  try {
+    const applied = await applyMigrations(pool);
+    console.log(`migrations applied: ${applied.join(', ')}`);
+  } finally {
+    await pool.end();
+  }
 }
 
-main().catch(async (err) => {
+main().catch((err) => {
   console.error(err);
-  await closeDb();
   process.exit(1);
 });
