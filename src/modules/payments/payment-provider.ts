@@ -11,6 +11,12 @@ export interface AuthorizeRequest {
   amountMinor: number;
   currency: string;
   idempotencyKey: string;
+  /**
+   * Gateway-specific payment source (e.g. a Moyasar card token minted client-side).
+   * The fake provider ignores it; a real PSP requires it. Passed through from
+   * checkout so no card data ever transits the core.
+   */
+  source?: Record<string, unknown>;
 }
 
 export interface PaymentIntent {

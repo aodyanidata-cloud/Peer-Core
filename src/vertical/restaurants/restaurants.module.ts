@@ -5,6 +5,8 @@ import { CatalogModule } from '../../modules/catalog/catalog.module';
 import { AgentModule } from '../../modules/agent/agent.module';
 import { PaymentsModule } from '../../modules/payments/payments.module';
 import { PAYMENT_PROVIDER, type PaymentProvider } from '../../modules/payments/payment-provider';
+import { NotificationsModule } from '../../modules/notifications/notifications.module';
+import { NotificationService } from '../../modules/notifications/notification.service';
 import { RestaurantService } from './restaurant.service';
 import { MenuService } from './menu.service';
 import { MenuSyncService } from './menu-sync.service';
@@ -14,6 +16,8 @@ import { ReservationService } from './reservation.service';
 import { ComplaintService } from './complaint.service';
 import { OnboardingService } from './onboarding.service';
 import { OrderService } from './order.service';
+import { CartService } from './cart.service';
+import { DeliveryService } from './delivery.service';
 import { TenantResolver } from './tenant-resolver';
 import { DinerController } from './diner.controller';
 
@@ -24,7 +28,13 @@ import { DinerController } from './diner.controller';
  * depends on this.
  */
 @Module({
-  imports: [TenancyModule, CatalogModule, AgentModule, PaymentsModule],
+  imports: [
+    TenancyModule,
+    CatalogModule,
+    AgentModule,
+    PaymentsModule,
+    NotificationsModule,
+  ],
   controllers: [DinerController],
   providers: [
     RestaurantService,
@@ -38,10 +48,20 @@ import { DinerController } from './diner.controller';
     TenantResolver,
     {
       provide: OrderService,
-      inject: [TenancyService, PAYMENT_PROVIDER],
-      useFactory: (tenancy: TenancyService, payments: PaymentProvider) =>
-        new OrderService(tenancy, payments),
+      inject: [TenancyService, PAYMENT_PROVIDER, NotificationService],
+      useFactory: (
+        tenancy: TenancyService,
+        payments: PaymentProvider,
+        notifier: NotificationService,
+      ) => new OrderService(tenancy, payments, notifier),
     },
+    {
+      provide: CartService,
+      inject: [TenancyService, OrderService],
+      useFactory: (tenancy: TenancyService, orders: OrderService) =>
+        new CartService(tenancy, orders),
+    },
+    DeliveryService,
   ],
   exports: [
     RestaurantService,
@@ -53,6 +73,8 @@ import { DinerController } from './diner.controller';
     ComplaintService,
     OnboardingService,
     OrderService,
+    CartService,
+    DeliveryService,
   ],
 })
 export class RestaurantsModule {}

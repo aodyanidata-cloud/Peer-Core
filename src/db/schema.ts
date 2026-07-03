@@ -401,3 +401,70 @@ export const payments = pgTable('payments', {
     .notNull()
     .defaultNow(),
 });
+
+// ─── Cart + delivery (R2) ────────────────────────────────────────────────────
+
+export const carts = pgTable('carts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  branchId: uuid('branch_id')
+    .notNull()
+    .references(() => branches.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const cartItems = pgTable('cart_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  cartId: uuid('cart_id')
+    .notNull()
+    .references(() => carts.id, { onDelete: 'cascade' }),
+  itemId: uuid('item_id')
+    .notNull()
+    .references(() => catalogItems.id, { onDelete: 'cascade' }),
+  quantity: integer('quantity').notNull(),
+  modifiers: jsonb('modifiers').notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const deliveries = pgTable('deliveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  driverName: text('driver_name').notNull(),
+  driverPhone: text('driver_phone').notNull(),
+  status: text('status').notNull().default('assigned'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const driverEarnings = pgTable('driver_earnings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  driverPhone: text('driver_phone').notNull(),
+  orderId: uuid('order_id').references(() => orders.id, {
+    onDelete: 'set null',
+  }),
+  amountMinor: integer('amount_minor').notNull(),
+  settled: boolean('settled').notNull().default(false),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

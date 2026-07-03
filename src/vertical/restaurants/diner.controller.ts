@@ -13,6 +13,7 @@ import { TenantResolver } from './tenant-resolver';
 import { DinerAgentService } from './diner-agent.service';
 import { FaqService } from './faq.service';
 import { ReservationService } from './reservation.service';
+import { OrderService, type CheckoutLine } from './order.service';
 
 interface BookBody {
   branchId: string;
@@ -36,6 +37,7 @@ export class DinerController {
     private readonly agent: DinerAgentService,
     private readonly faq: FaqService,
     private readonly reservations: ReservationService,
+    private readonly orders: OrderService,
   ) {}
 
   private async resolve(slug: string): Promise<string> {
@@ -90,6 +92,40 @@ export class DinerController {
       ...(body.dinerName !== undefined ? { dinerName: body.dinerName } : {}),
       ...(body.dinerPhone !== undefined ? { dinerPhone: body.dinerPhone } : {}),
     });
+  }
+
+  @Post('orders')
+  async placeOrder(
+    @Param('slug') slug: string,
+    @Body()
+    body: {
+      branchId: string;
+      orderType?: 'delivery' | 'pickup' | 'dinein';
+      lines: CheckoutLine[];
+      dinerPhone?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    const tenantId = await this.resolve(slug);
+    return this.orders.checkout(tenantId, {
+      branchId: body.branchId,
+      orderType: body.orderType ?? 'pickup',
+      lines: body.lines,
+      ...(body.dinerPhone !== undefined ? { dinerPhone: body.dinerPhone } : {}),
+      ...(body.idempotencyKey !== undefined
+        ? { idempotencyKey: body.idempotencyKey }
+        : {}),
+    });
+  }
+
+  @Get('orders/:orderId')
+  async trackOrder(
+    @Param('slug') slug: string,
+    @Param('orderId') orderId: string,
+  ) {
+    const tracking = await this.orders.getOrder(await this.resolve(slug), orderId);
+    if (!tracking) throw new NotFoundException('unknown order');
+    return tracking;
   }
 
   @Get('widget')
