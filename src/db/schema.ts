@@ -164,3 +164,19 @@ export const toolInvocations = pgTable('tool_invocations', {
     .defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
+
+// ─── Knowledge base (B6) — tenant-scoped RAG source ──────────────────────────
+
+export const kbDocuments = pgTable('kb_documents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  source: text('source').notNull().default('manual'),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  embedding: jsonb('embedding').$type<number[]>().notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
