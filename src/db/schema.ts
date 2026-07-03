@@ -239,3 +239,30 @@ export const menuAvailability = pgTable(
     uqItemBranch: unique('uq_menu_availability').on(t.itemId, t.branchId),
   }),
 );
+
+/**
+ * Reservations. Atomic double-booking prevention is enforced by an exclusion
+ * constraint in the 0007 migration (ex_reservations_no_overlap), not in app code.
+ */
+export const reservations = pgTable('reservations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  branchId: uuid('branch_id')
+    .notNull()
+    .references(() => branches.id, { onDelete: 'cascade' }),
+  tableId: uuid('table_id')
+    .notNull()
+    .references(() => restaurantTables.id, { onDelete: 'cascade' }),
+  partySize: integer('party_size').notNull(),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+  endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('confirmed'),
+  dinerName: text('diner_name'),
+  dinerPhone: text('diner_phone'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

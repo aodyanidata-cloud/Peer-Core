@@ -6,6 +6,8 @@ import { RestaurantService } from './restaurant.service';
 import { MenuService } from './menu.service';
 import { MenuSyncService } from './menu-sync.service';
 import { DinerAgentService } from './diner-agent.service';
+import { FaqService } from './faq.service';
+import { ReservationService } from './reservation.service';
 
 /**
  * RestaurantsModule — the Restaurants vertical (R1). A plug-in on the generic
@@ -19,12 +21,16 @@ import { DinerAgentService } from './diner-agent.service';
     MenuService,
     MenuSyncService,
     DinerAgentService,
+    FaqService,
+    ReservationService,
   ],
   exports: [
     RestaurantService,
     MenuService,
     MenuSyncService,
     DinerAgentService,
+    FaqService,
+    ReservationService,
   ],
 })
 export class RestaurantsModule {}
