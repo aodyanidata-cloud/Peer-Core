@@ -4,6 +4,7 @@ import {
   text,
   jsonb,
   timestamp,
+  integer,
   unique,
 } from 'drizzle-orm/pg-core';
 
@@ -44,3 +45,63 @@ export const tenantSettings = pgTable(
     uqTenantKey: unique('uq_tenant_settings_tenant_key').on(t.tenantId, t.key),
   }),
 );
+
+// ─── Identity plane (B2) ──────────────────────────────────────────────────────
+// Auth-plane tables. Not tenant-scoped data: this is where tenant/role authority
+// is RESOLVED (a user's memberships), so it is reached only through the auth
+// service, never from tenant-scoped request handling.
+
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  phone: text('phone').notNull().unique(),
+  displayName: text('display_name'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** A user's role within a tenant. The sole source of tenant/role authority. */
+export const memberships = pgTable(
+  'memberships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(), // 'owner' | 'staff' — enforced by a CHECK constraint
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    uqUserTenant: unique('uq_memberships_user_tenant').on(t.userId, t.tenantId),
+  }),
+);
+
+export const otpChallenges = pgTable('otp_challenges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  phone: text('phone').notNull(),
+  codeHash: text('code_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

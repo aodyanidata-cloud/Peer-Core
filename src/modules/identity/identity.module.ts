@@ -1,9 +1,22 @@
 import { Module } from '@nestjs/common';
+import { getDb } from '../../db';
+import { AuthService } from './auth.service';
+import { OTP_SENDER, LoggingOtpSender, type OtpSender } from './otp-sender';
 
 /**
  * IdentityModule
- * User accounts, sessions, mobile-OTP identity. Generic; no vertical logic.
- * Scaffold only (Stage A1) — no business logic yet.
+ * User accounts, mobile-OTP identity, hashed sessions, tenant/role authority (B2 🔴).
+ * Generic; no vertical logic.
  */
-@Module({})
+@Module({
+  providers: [
+    { provide: OTP_SENDER, useClass: LoggingOtpSender },
+    {
+      provide: AuthService,
+      inject: [OTP_SENDER],
+      useFactory: (sender: OtpSender) => new AuthService(getDb(), sender),
+    },
+  ],
+  exports: [AuthService],
+})
 export class IdentityModule {}
