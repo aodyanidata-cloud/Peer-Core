@@ -143,3 +143,24 @@ export const catalogItems = pgTable('catalog_items', {
     .notNull()
     .defaultNow(),
 });
+
+// ─── Tool dispatcher (B4) — idempotency + audit ──────────────────────────────
+
+export const toolInvocations = pgTable('tool_invocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  tool: text('tool').notNull(),
+  idempotencyKey: text('idempotency_key'),
+  actorUserId: uuid('actor_user_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  args: jsonb('args').notNull().default({}),
+  status: text('status').notNull().default('pending'),
+  result: jsonb('result'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
