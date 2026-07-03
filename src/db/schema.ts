@@ -105,3 +105,41 @@ export const sessions = pgTable('sessions', {
     .notNull()
     .defaultNow(),
 });
+
+// ─── Catalog (B3) — generic, tenant-scoped, POS-compatible ───────────────────
+
+export const catalogCategories = pgTable('catalog_categories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status').notNull().default('active'),
+  externalRef: text('external_ref'),
+  source: text('source'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const catalogItems = pgTable('catalog_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  categoryId: uuid('category_id').references(() => catalogCategories.id, {
+    onDelete: 'set null',
+  }),
+  name: text('name').notNull(),
+  description: text('description'),
+  priceMinor: integer('price_minor').notNull().default(0),
+  currency: text('currency').notNull().default('SAR'),
+  attributes: jsonb('attributes').notNull().default({}),
+  status: text('status').notNull().default('available'),
+  externalRef: text('external_ref'),
+  source: text('source'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
