@@ -95,22 +95,52 @@ export class DinerController {
   @Get('widget')
   @Header('Content-Type', 'text/html; charset=utf-8')
   widget(@Param('slug') slug: string): string {
-    // Minimal self-contained widget: fetches this tenant's menu from the API above.
+    // Self-contained visual-first diner widget: fetches this tenant's menu from
+    // the API above. No external assets (CSP-safe, works offline of any CDN).
     return `<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Menu</title>
-<body style="font-family:system-ui;max-width:640px;margin:2rem auto;padding:0 1rem">
-<h1>Menu</h1>
-<input id="q" placeholder="Search the menu…" style="width:100%;padding:.6rem;font-size:1rem">
-<ul id="out"></ul>
+<style>
+  :root{--bg:#0f1720;--card:#182430;--ink:#eef3f8;--muted:#93a4b5;--brand:#1db584;--line:#243444}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+  header{padding:28px 20px 18px;background:linear-gradient(135deg,#123a30,#0f1720)}
+  .brandrow{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--brand)}
+  h1{margin:6px 0 2px;font-size:26px}
+  .sub{color:var(--muted);font-size:14px}
+  .search{padding:14px 20px;position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line)}
+  .search input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px}
+  .search input::placeholder{color:var(--muted)}
+  ul{list-style:none;margin:0;padding:12px 16px 24px;display:flex;flex-direction:column;gap:10px;flex:1}
+  li{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+  .name{font-weight:600;font-size:15px}
+  .price{background:rgba(29,181,132,.14);color:var(--brand);font-weight:700;font-size:14px;padding:6px 10px;border-radius:10px;white-space:nowrap}
+  .empty{color:var(--muted);text-align:center;padding:30px}
+  footer{padding:14px 20px 22px;color:var(--muted);font-size:12px;text-align:center;border-top:1px solid var(--line)}
+</style>
+<body><div class="wrap">
+  <header>
+    <div class="brandrow"><span class="dot"></span><span>Order &amp; reserve</span></div>
+    <h1 id="title">Restaurant</h1>
+    <div class="sub">Browse the menu, ask the agent, or book a table.</div>
+  </header>
+  <div class="search"><input id="q" placeholder="Search the menu…" autocomplete="off"></div>
+  <ul id="out"></ul>
+  <footer>Powered by <strong>Peers</strong></footer>
+</div>
 <script>
 const slug=${JSON.stringify(slug)};
+document.getElementById('title').textContent =
+  slug.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+function money(m,c){return (m/100).toLocaleString(undefined,{minimumFractionDigits:2})+' '+c}
 async function load(q){
   const r=await fetch('/api/v1/r/'+encodeURIComponent(slug)+'/menu?q='+encodeURIComponent(q||''));
   const items=await r.json();
-  document.getElementById('out').innerHTML =
-    items.map(i=>'<li>'+i.name+' — '+(i.priceMinor/100).toFixed(2)+' '+i.currency+'</li>').join('')
-    || '<li>No items found.</li>';
+  document.getElementById('out').innerHTML = items.length
+    ? items.map(i=>'<li><span class="name">'+i.name+'</span><span class="price">'+money(i.priceMinor,i.currency)+'</span></li>').join('')
+    : '<div class="empty">No items match that search.</div>';
 }
 document.getElementById('q').addEventListener('input',e=>load(e.target.value));
 load('');
