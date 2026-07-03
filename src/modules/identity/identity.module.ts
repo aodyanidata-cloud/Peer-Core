@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { getDb } from '../../db';
 import { AuthService } from './auth.service';
+import { AuthGuard } from './auth.guard';
 import { OTP_SENDER, LoggingOtpSender, type OtpSender } from './otp-sender';
 
 /**
@@ -16,7 +17,8 @@ import { OTP_SENDER, LoggingOtpSender, type OtpSender } from './otp-sender';
       inject: [OTP_SENDER],
       useFactory: (sender: OtpSender) => new AuthService(getDb(), sender),
     },
+    AuthGuard,
   ],
-  exports: [AuthService],
+  exports: [AuthService, AuthGuard],
 })
 export class IdentityModule {}

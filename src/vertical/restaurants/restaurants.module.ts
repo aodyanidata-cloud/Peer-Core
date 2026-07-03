@@ -7,7 +7,13 @@ import { PaymentsModule } from '../../modules/payments/payments.module';
 import { PAYMENT_PROVIDER, type PaymentProvider } from '../../modules/payments/payment-provider';
 import { NotificationsModule } from '../../modules/notifications/notifications.module';
 import { NotificationService } from '../../modules/notifications/notification.service';
+import { IdentityModule } from '../../modules/identity/identity.module';
 import { RestaurantService } from './restaurant.service';
+import { PromotionService } from './promotion.service';
+import { LoyaltyService } from './loyalty.service';
+import { ReviewService } from './review.service';
+import { DriverDirectoryService } from './driver-directory.service';
+import { StaffController } from './staff.controller';
 import { MenuService } from './menu.service';
 import { MenuSyncService } from './menu-sync.service';
 import { DinerAgentService } from './diner-agent.service';
@@ -34,8 +40,9 @@ import { DinerController } from './diner.controller';
     AgentModule,
     PaymentsModule,
     NotificationsModule,
+    IdentityModule,
   ],
-  controllers: [DinerController],
+  controllers: [DinerController, StaffController],
   providers: [
     RestaurantService,
     MenuService,
@@ -62,6 +69,10 @@ import { DinerController } from './diner.controller';
         new CartService(tenancy, orders),
     },
     DeliveryService,
+    PromotionService,
+    LoyaltyService,
+    ReviewService,
+    DriverDirectoryService,
   ],
   exports: [
     RestaurantService,
@@ -75,6 +86,10 @@ import { DinerController } from './diner.controller';
     OrderService,
     CartService,
     DeliveryService,
+    PromotionService,
+    LoyaltyService,
+    ReviewService,
+    DriverDirectoryService,
   ],
 })
 export class RestaurantsModule {}

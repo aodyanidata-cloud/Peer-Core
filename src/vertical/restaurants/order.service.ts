@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { TenancyService } from '../../modules/tenancy/tenancy.service';
 import type { PaymentProvider } from '../../modules/payments/payment-provider';
@@ -38,6 +38,7 @@ export class OrderError extends Error {
       | 'bad_item'
       | 'unavailable'
       | 'bad_modifier'
+      | 'bad_promo'
       | 'illegal_transition',
   ) {
     super(message);
@@ -58,6 +59,8 @@ export interface CheckoutInput {
   idempotencyKey?: string;
   dinerPhone?: string;
   source?: Record<string, unknown>; // gateway payment token (real PSP); fake ignores
+  promoCode?: string; // optional voucher/promotion code
+  scheduledFor?: Date; // optional advance-order time (§11A)
 }
 
 interface ModifierGroup {
@@ -103,7 +106,24 @@ export class OrderService {
       }
 
       const { priceLines, snapshots } = await this.resolveLines(tx, input.lines);
-      const totals = computeTotals(priceLines, input.deliveryFeeMinor ?? 0);
+      const deliveryFee = input.deliveryFeeMinor ?? 0;
+      const base = computeTotals(priceLines, deliveryFee, 0);
+
+      // Resolve a promotion (if any) against the server-computed subtotal.
+      let discountMinor = 0;
+      let promoCode: string | null = null;
+      if (input.promoCode) {
+        const promo = await this.resolvePromo(
+          tx,
+          tenantId,
+          input.promoCode,
+          base.subtotalMinor,
+        );
+        discountMinor = promo.discountMinor;
+        promoCode = promo.code;
+      }
+
+      const totals = computeTotals(priceLines, deliveryFee, discountMinor);
 
       // Authorize BEFORE creating the order. A decline throws → tx rolls back →
       // no order exists.
@@ -130,6 +150,9 @@ export class OrderService {
           paymentRef: intent.ref,
           idempotencyKey: input.idempotencyKey ?? null,
           dinerPhone: input.dinerPhone ?? null,
+          discountMinor: totals.discountMinor,
+          promotionCode: promoCode,
+          scheduledFor: input.scheduledFor ?? null,
         })
         .returning();
 
@@ -212,6 +235,23 @@ export class OrderService {
     });
   }
 
+  /** Staff queue: all open (non-terminal) orders for the tenant, oldest first. */
+  queue(tenantId: string) {
+    const OPEN: OrderStatus[] = [
+      'NEW',
+      'ACCEPTED',
+      'PREPARING',
+      'READY',
+      'OUT_FOR_DELIVERY',
+    ];
+    return this.tenancy.runAs(tenantId, async (tx) => {
+      const rows = await tx.select().from(schema.orders);
+      return rows
+        .filter((r) => OPEN.includes(r.status as OrderStatus))
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    });
+  }
+
   /** Staff order queue: orders for a branch, optionally filtered by status. */
   listForBranch(tenantId: string, branchId: string, statuses?: OrderStatus[]) {
     return this.tenancy.runAs(tenantId, async (tx) => {
@@ -269,6 +309,46 @@ export class OrderService {
       snapshots.push({ itemId: item.id, name: item.name });
     }
     return { priceLines, snapshots };
+  }
+
+  /** Validate a promo against the server subtotal, compute the discount, redeem it. */
+  private async resolvePromo(
+    tx: Parameters<Parameters<TenancyService['runAs']>[1]>[0],
+    tenantId: string,
+    code: string,
+    subtotalMinor: number,
+  ): Promise<{ discountMinor: number; code: string }> {
+    const [promo] = await tx
+      .select()
+      .from(schema.promotions)
+      .where(
+        and(
+          eq(schema.promotions.tenantId, tenantId),
+          eq(schema.promotions.code, code),
+        ),
+      )
+      .limit(1);
+    if (!promo || !promo.active) {
+      throw new OrderError('invalid promo code', 'bad_promo');
+    }
+    if (subtotalMinor < promo.minOrderMinor) {
+      throw new OrderError('order below promo minimum', 'bad_promo');
+    }
+    if (
+      promo.maxRedemptions !== null &&
+      promo.redeemedCount >= promo.maxRedemptions
+    ) {
+      throw new OrderError('promo fully redeemed', 'bad_promo');
+    }
+    const discountMinor =
+      promo.kind === 'percent'
+        ? Math.round((subtotalMinor * promo.value) / 100)
+        : Math.min(promo.value, subtotalMinor);
+    await tx
+      .update(schema.promotions)
+      .set({ redeemedCount: promo.redeemedCount + 1 })
+      .where(eq(schema.promotions.id, promo.id));
+    return { discountMinor, code: promo.code };
   }
 
   private async transition(
@@ -351,6 +431,30 @@ export class OrderService {
       fromStatus: order.status,
       toStatus: to,
     });
+
+    // Loyalty: award 1 point per SAR when an order completes.
+    if (to === 'COMPLETE' && order.dinerPhone) {
+      const points = Math.floor(order.totalMinor / 100);
+      if (points > 0) {
+        await tx
+          .insert(schema.loyaltyAccounts)
+          .values({ tenantId, dinerPhone: order.dinerPhone, points })
+          .onConflictDoUpdate({
+            target: [
+              schema.loyaltyAccounts.tenantId,
+              schema.loyaltyAccounts.dinerPhone,
+            ],
+            set: { points: sql`${schema.loyaltyAccounts.points} + ${points}` },
+          });
+        await tx.insert(schema.loyaltyLedger).values({
+          tenantId,
+          dinerPhone: order.dinerPhone,
+          orderId: order.id,
+          delta: points,
+          reason: 'order_complete',
+        });
+      }
+    }
     return updated;
   }
 }

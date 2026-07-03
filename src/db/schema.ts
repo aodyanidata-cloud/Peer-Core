@@ -345,6 +345,9 @@ export const orders = pgTable('orders', {
   paymentRef: text('payment_ref'),
   idempotencyKey: text('idempotency_key'),
   dinerPhone: text('diner_phone'),
+  scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
+  discountMinor: integer('discount_minor').notNull().default(0),
+  promotionCode: text('promotion_code'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -464,6 +467,96 @@ export const driverEarnings = pgTable('driver_earnings', {
   amountMinor: integer('amount_minor').notNull(),
   settled: boolean('settled').notNull().default(false),
   settledAt: timestamp('settled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// ─── Merchant features (R2 §11A): promotions, loyalty, reviews, driver directory ─
+
+export const promotions = pgTable(
+  'promotions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    code: text('code').notNull(),
+    kind: text('kind').notNull(), // 'percent' | 'amount'
+    value: integer('value').notNull(),
+    minOrderMinor: integer('min_order_minor').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+    maxRedemptions: integer('max_redemptions'),
+    redeemedCount: integer('redeemed_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({ uqCode: unique('uq_promotions_code').on(t.tenantId, t.code) }),
+);
+
+export const loyaltyAccounts = pgTable(
+  'loyalty_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    dinerPhone: text('diner_phone').notNull(),
+    points: integer('points').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({ uqAcct: unique('uq_loyalty_account').on(t.tenantId, t.dinerPhone) }),
+);
+
+export const loyaltyLedger = pgTable('loyalty_ledger', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  dinerPhone: text('diner_phone').notNull(),
+  orderId: uuid('order_id').references(() => orders.id, {
+    onDelete: 'set null',
+  }),
+  delta: integer('delta').notNull(),
+  reason: text('reason').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const reviews = pgTable(
+  'reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({ uqOrder: unique('uq_reviews_order').on(t.orderId) }),
+);
+
+export const driverListings = pgTable('driver_listings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  phone: text('phone').notNull(),
+  areas: text('areas'),
+  vehicleType: text('vehicle_type'),
+  rateNote: text('rate_note'),
+  verified: boolean('verified').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),

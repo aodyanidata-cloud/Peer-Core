@@ -20,14 +20,20 @@ export interface PricedLine {
 }
 export interface OrderTotals {
   subtotalMinor: number;
+  discountMinor: number;
   vatMinor: number;
   totalMinor: number;
   lines: PricedLine[];
 }
 
+/**
+ * VAT applies to the DISCOUNTED base: total = (subtotal − discount) + VAT + delivery.
+ * The discount is clamped so the taxable base never goes negative.
+ */
 export function computeTotals(
   lines: PriceLineInput[],
   deliveryFeeMinor = 0,
+  discountMinor = 0,
 ): OrderTotals {
   const priced = lines.map((l) => {
     if (!Number.isInteger(l.quantity) || l.quantity <= 0) {
@@ -45,11 +51,14 @@ export function computeTotals(
     };
   });
   const subtotalMinor = priced.reduce((s, l) => s + l.lineTotalMinor, 0);
-  const vatMinor = Math.round((subtotalMinor * VAT_RATE_PERCENT) / 100);
+  const discount = Math.max(0, Math.min(discountMinor, subtotalMinor));
+  const taxableBase = subtotalMinor - discount;
+  const vatMinor = Math.round((taxableBase * VAT_RATE_PERCENT) / 100);
   return {
     subtotalMinor,
+    discountMinor: discount,
     vatMinor,
-    totalMinor: subtotalMinor + vatMinor + deliveryFeeMinor,
+    totalMinor: taxableBase + vatMinor + deliveryFeeMinor,
     lines: priced,
   };
 }
