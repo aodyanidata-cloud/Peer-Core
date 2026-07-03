@@ -323,3 +323,81 @@ export const notificationOptouts = pgTable(
     ),
   }),
 );
+
+// ─── Orders + money loop (R2) ────────────────────────────────────────────────
+
+export const orders = pgTable('orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  branchId: uuid('branch_id')
+    .notNull()
+    .references(() => branches.id, { onDelete: 'cascade' }),
+  orderType: text('order_type').notNull(),
+  subtotalMinor: integer('subtotal_minor').notNull(),
+  vatMinor: integer('vat_minor').notNull(),
+  deliveryFeeMinor: integer('delivery_fee_minor').notNull().default(0),
+  totalMinor: integer('total_minor').notNull(),
+  currency: text('currency').notNull().default('SAR'),
+  status: text('status').notNull().default('NEW'),
+  paymentStatus: text('payment_status').notNull().default('authorized'),
+  paymentRef: text('payment_ref'),
+  idempotencyKey: text('idempotency_key'),
+  dinerPhone: text('diner_phone'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const orderItems = pgTable('order_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  itemId: uuid('item_id').references(() => catalogItems.id, {
+    onDelete: 'set null',
+  }),
+  name: text('name').notNull(),
+  unitPriceMinor: integer('unit_price_minor').notNull(),
+  quantity: integer('quantity').notNull(),
+  modifiers: jsonb('modifiers').notNull().default([]),
+  lineTotalMinor: integer('line_total_minor').notNull(),
+});
+
+export const orderEvents = pgTable('order_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status').notNull(),
+  note: text('note'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const payments = pgTable('payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  action: text('action').notNull(),
+  amountMinor: integer('amount_minor').notNull(),
+  provider: text('provider').notNull().default('fake'),
+  providerRef: text('provider_ref'),
+  status: text('status').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
