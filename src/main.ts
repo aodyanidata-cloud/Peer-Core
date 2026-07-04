@@ -5,6 +5,7 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
+import { DomainExceptionFilter } from './common/domain-exception.filter';
 
 const API_PREFIX = 'api/v1';
 
@@ -15,6 +16,7 @@ export async function createApp(): Promise<NestFastifyApplication> {
     { logger: ['error', 'warn', 'log'] },
   );
   app.setGlobalPrefix(API_PREFIX);
+  app.useGlobalFilters(new DomainExceptionFilter());
   return app;
 }
 

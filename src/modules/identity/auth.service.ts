@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Db } from '../tenancy/tenant-context';
 import {
@@ -19,6 +19,8 @@ import {
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const OTP_MAX_ATTEMPTS = 5;
+const OTP_REQUEST_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const OTP_MAX_REQUESTS = 3; // per phone per window
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const E164 = /^\+[1-9]\d{6,14}$/;
 
@@ -48,6 +50,20 @@ export class AuthService {
   async requestOtp(phone: string): Promise<void> {
     if (!E164.test(phone)) {
       throw new AuthError('phone must be E.164', 'invalid_phone');
+    }
+    // Rate-limit code requests per phone (SMS-bomb / cost-abuse guard).
+    const windowStart = new Date(this.now().getTime() - OTP_REQUEST_WINDOW_MS);
+    const recent = await this.db
+      .select({ id: schema.otpChallenges.id })
+      .from(schema.otpChallenges)
+      .where(
+        and(
+          eq(schema.otpChallenges.phone, phone),
+          gte(schema.otpChallenges.createdAt, windowStart),
+        ),
+      );
+    if (recent.length >= OTP_MAX_REQUESTS) {
+      throw new AuthError('too many code requests; try again later', 'otp_locked');
     }
     const code = generateOtpCode();
     await this.db.insert(schema.otpChallenges).values({

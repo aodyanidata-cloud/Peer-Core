@@ -89,8 +89,9 @@ d('R2 flow: cart, delivery ledger, order notifications', () => {
       lines: [{ itemId, quantity: 1 }],
     });
     await delivery.assign(tenantA, order.id, { name: 'Ali', phone: '+966500000001' }, 900);
+    // Reassigning the SAME order REPLACES the earning (no double-count).
     await delivery.assign(tenantA, order.id, { name: 'Ali', phone: '+966500000001' }, 1100);
-    expect(await delivery.owed(tenantA, '+966500000001')).toBe(2000);
+    expect(await delivery.owed(tenantA, '+966500000001')).toBe(1100);
     await delivery.settle(tenantA, '+966500000001', new Date('2026-07-20T00:00:00Z'));
     expect(await delivery.owed(tenantA, '+966500000001')).toBe(0);
   });

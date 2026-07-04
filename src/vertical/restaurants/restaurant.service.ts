@@ -10,6 +10,15 @@ export interface NewBranch {
   lng?: number;
   hours?: Record<string, [string, string][]>;
   phone?: string;
+  minOrderMinor?: number;
+}
+
+export interface BranchPatch {
+  name?: string;
+  address?: string;
+  phone?: string;
+  hours?: Record<string, [string, string][]>;
+  minOrderMinor?: number;
 }
 
 export interface NewTable {
@@ -39,6 +48,7 @@ export class RestaurantService {
           lng: input.lng ?? null,
           hours: input.hours ?? {},
           phone: input.phone ?? null,
+          minOrderMinor: input.minOrderMinor ?? 0,
         })
         .returning();
       return row;
@@ -49,6 +59,32 @@ export class RestaurantService {
     return this.tenancy.runAs(tenantId, (tx) =>
       tx.select().from(schema.branches),
     );
+  }
+
+  /** Update branch settings a merchant edits post-onboarding (hours, minimum order). */
+  updateBranch(tenantId: string, branchId: string, patch: BranchPatch) {
+    if (
+      patch.minOrderMinor !== undefined &&
+      (!Number.isInteger(patch.minOrderMinor) || patch.minOrderMinor < 0)
+    ) {
+      throw new Error('minOrderMinor must be a non-negative integer (minor units)');
+    }
+    return this.tenancy.runAs(tenantId, async (tx) => {
+      const [row] = await tx
+        .update(schema.branches)
+        .set({
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.address !== undefined ? { address: patch.address } : {}),
+          ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
+          ...(patch.hours !== undefined ? { hours: patch.hours } : {}),
+          ...(patch.minOrderMinor !== undefined
+            ? { minOrderMinor: patch.minOrderMinor }
+            : {}),
+        })
+        .where(eq(schema.branches.id, branchId))
+        .returning();
+      return row;
+    });
   }
 
   async addTable(tenantId: string, input: NewTable) {

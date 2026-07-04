@@ -2,7 +2,9 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Param,
+  Query,
   Body,
   Req,
   UseGuards,
@@ -13,18 +15,38 @@ import { AuthGuard, type AuthedRequest } from '../../modules/identity/auth.guard
 import { AuthService } from '../../modules/identity/auth.service';
 import { OrderService } from './order.service';
 import type { OrderStatus } from './order-state';
+import { RestaurantService, type BranchPatch } from './restaurant.service';
+import { MenuService, type NewMenuItem } from './menu.service';
+import { MenuSyncService } from './menu-sync.service';
+import { PromotionService } from './promotion.service';
+import { LoyaltyService } from './loyalty.service';
+import { ReviewService } from './review.service';
+import { ComplaintService, type ComplaintStatus } from './complaint.service';
+import { DeliveryService, type DeliveryStatus } from './delivery.service';
+import { DriverDirectoryService } from './driver-directory.service';
 
 /**
  * StaffController — the merchant/staff console API (auth-guarded). The tenant is
  * derived from the authenticated user's DB membership (owner|staff), never from
- * the client, closing the auth → tenant loop over HTTP. The console HTML shell
- * itself is public; every action it calls goes through the guard.
+ * the client, closing the auth → tenant loop over HTTP. Every management action
+ * a merchant performs — menu, branches, promotions, loyalty, reviews, complaints,
+ * delivery, drivers — is reachable here behind the same guard. The console HTML
+ * shell itself is public; every action it calls goes through the guard.
  */
 @Controller('staff')
 export class StaffController {
   constructor(
     private readonly orders: OrderService,
     private readonly auth: AuthService,
+    private readonly restaurants: RestaurantService,
+    private readonly menu: MenuService,
+    private readonly menuSync: MenuSyncService,
+    private readonly promotions: PromotionService,
+    private readonly loyalty: LoyaltyService,
+    private readonly reviews: ReviewService,
+    private readonly complaints: ComplaintService,
+    private readonly deliveries: DeliveryService,
+    private readonly drivers: DriverDirectoryService,
   ) {}
 
   private tenantOf(req: AuthedRequest): string {
@@ -34,6 +56,7 @@ export class StaffController {
     return this.auth.authorizeTenant(ctx, membership.tenantId, ['owner', 'staff']);
   }
 
+  // ── Order queue ──────────────────────────────────────────────────────────
   @UseGuards(AuthGuard)
   @Get('orders')
   queue(@Req() req: AuthedRequest) {
@@ -60,6 +83,184 @@ export class StaffController {
     @Body() body: { to: OrderStatus },
   ) {
     return this.orders.advance(this.tenantOf(req), id, body.to);
+  }
+
+  // ── Branches ─────────────────────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Get('branches')
+  listBranches(@Req() req: AuthedRequest) {
+    return this.restaurants.listBranches(this.tenantOf(req));
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('branches')
+  createBranch(
+    @Req() req: AuthedRequest,
+    @Body() body: { name: string; address?: string; phone?: string; minOrderMinor?: number; hours?: Record<string, [string, string][]> },
+  ) {
+    return this.restaurants.createBranch(this.tenantOf(req), body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Patch('branches/:id')
+  updateBranch(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: BranchPatch,
+  ) {
+    return this.restaurants.updateBranch(this.tenantOf(req), id, body);
+  }
+
+  // ── Menu management ──────────────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Post('menu/items')
+  createItem(@Req() req: AuthedRequest, @Body() body: NewMenuItem) {
+    return this.menu.createItem(this.tenantOf(req), body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('menu/items/:id/sold-out')
+  setSoldOut(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { soldOut: boolean },
+  ) {
+    return this.menu.setSoldOut(this.tenantOf(req), id, body.soldOut);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('menu/sync')
+  async syncMenu(@Req() req: AuthedRequest) {
+    const indexed = await this.menuSync.syncAll(this.tenantOf(req));
+    return { indexed };
+  }
+
+  // ── Promotions ───────────────────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Get('promotions')
+  listPromotions(@Req() req: AuthedRequest) {
+    return this.promotions.list(this.tenantOf(req));
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('promotions')
+  createPromotion(
+    @Req() req: AuthedRequest,
+    @Body()
+    body: {
+      code: string;
+      kind: 'percent' | 'amount';
+      value: number;
+      minOrderMinor?: number;
+      maxRedemptions?: number;
+    },
+  ) {
+    return this.promotions.create(this.tenantOf(req), body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('promotions/:id/deactivate')
+  deactivatePromotion(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.promotions.deactivate(this.tenantOf(req), id);
+  }
+
+  // ── Loyalty (read side) ──────────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Get('loyalty/:phone')
+  async loyaltyOf(@Req() req: AuthedRequest, @Param('phone') phone: string) {
+    const tenantId = this.tenantOf(req);
+    const [balance, history] = await Promise.all([
+      this.loyalty.balance(tenantId, phone),
+      this.loyalty.history(tenantId, phone),
+    ]);
+    return { phone, balance, history };
+  }
+
+  // ── Reviews ──────────────────────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Get('reviews/summary')
+  reviewSummary(@Req() req: AuthedRequest) {
+    return this.reviews.summary(this.tenantOf(req));
+  }
+
+  // ── Complaints ───────────────────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Get('complaints')
+  listComplaints(@Req() req: AuthedRequest) {
+    return this.complaints.listOpen(this.tenantOf(req));
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('complaints/:id/status')
+  setComplaintStatus(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { status: ComplaintStatus },
+  ) {
+    return this.complaints.setStatus(this.tenantOf(req), id, body.status);
+  }
+
+  // ── Delivery + driver ledger ─────────────────────────────────────────────
+  @UseGuards(AuthGuard)
+  @Post('orders/:id/delivery')
+  assignDelivery(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { driverName: string; driverPhone: string; earningMinor: number },
+  ) {
+    return this.deliveries.assign(
+      this.tenantOf(req),
+      id,
+      { name: body.driverName, phone: body.driverPhone },
+      body.earningMinor,
+    );
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('deliveries/:id/status')
+  setDeliveryStatus(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { status: DeliveryStatus },
+  ) {
+    return this.deliveries.setStatus(this.tenantOf(req), id, body.status);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('drivers/:phone/owed')
+  async driverOwed(@Req() req: AuthedRequest, @Param('phone') phone: string) {
+    const owedMinor = await this.deliveries.owed(this.tenantOf(req), phone);
+    return { driverPhone: phone, owedMinor };
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('drivers/:phone/settle')
+  async settleDriver(@Req() req: AuthedRequest, @Param('phone') phone: string) {
+    await this.deliveries.settle(this.tenantOf(req), phone, new Date());
+    return { driverPhone: phone, settled: true };
+  }
+
+  // ── Driver directory (off-platform discovery) ────────────────────────────
+  @UseGuards(AuthGuard)
+  @Get('driver-directory')
+  listDriverDirectory(@Req() req: AuthedRequest, @Query('area') area?: string) {
+    return this.drivers.list(this.tenantOf(req), area);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('driver-directory')
+  addDriverListing(
+    @Req() req: AuthedRequest,
+    @Body()
+    body: {
+      name: string;
+      phone: string;
+      areas?: string;
+      vehicleType?: string;
+      rateNote?: string;
+    },
+  ) {
+    return this.drivers.add(this.tenantOf(req), body);
   }
 
   @Get('console')

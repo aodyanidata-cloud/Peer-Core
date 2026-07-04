@@ -54,7 +54,7 @@ d('order flow over HTTP (R2)', () => {
   it('places an order and then tracks it, with server-side totals', async () => {
     const place = await supertest(app.getHttpServer())
       .post(`/api/v1/r/${slug}/orders`)
-      .send({ branchId, orderType: 'pickup', lines: [{ itemId, quantity: 2 }], dinerPhone: '+966511111111' });
+      .send({ branchId, orderType: 'pickup', lines: [{ itemId, quantity: 2 }], dinerPhone: '+966511111111', idempotencyKey: 'ord-1' });
     expect(place.status).toBe(201);
     expect(place.body.status).toBe('NEW');
     expect(place.body.subtotalMinor).toBe(7000); // 2 x 3500, server-computed

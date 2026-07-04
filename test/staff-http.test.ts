@@ -64,7 +64,7 @@ d('staff console over HTTP — auth-guarded (R2)', () => {
     // authorization that the staff accept later captures.
     const placed = await supertest(app.getHttpServer())
       .post('/api/v1/r/grill/orders')
-      .send({ branchId, orderType: 'pickup', lines: [{ itemId: item.id, quantity: 1 }] });
+      .send({ branchId, orderType: 'pickup', lines: [{ itemId: item.id, quantity: 1 }], idempotencyKey: 'staff-ord-1' });
     orderId = placed.body.id;
   });
 

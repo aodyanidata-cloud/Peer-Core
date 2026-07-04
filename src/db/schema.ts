@@ -194,8 +194,9 @@ export const branches = pgTable('branches', {
   address: text('address'),
   lat: doublePrecision('lat'),
   lng: doublePrecision('lng'),
-  hours: jsonb('hours').notNull().default({}),
+  hours: jsonb('hours').$type<Record<string, [string, string][]>>().notNull().default({}),
   phone: text('phone'),
+  minOrderMinor: integer('min_order_minor').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),

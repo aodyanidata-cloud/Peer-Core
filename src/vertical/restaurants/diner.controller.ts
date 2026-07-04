@@ -8,12 +8,16 @@ import {
   Header,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { TenantResolver } from './tenant-resolver';
 import { DinerAgentService } from './diner-agent.service';
 import { FaqService } from './faq.service';
 import { ReservationService } from './reservation.service';
 import { OrderService, type CheckoutLine } from './order.service';
+import { ComplaintService } from './complaint.service';
+import { ReviewService } from './review.service';
+import { CartService } from './cart.service';
 
 interface BookBody {
   branchId: string;
@@ -38,6 +42,9 @@ export class DinerController {
     private readonly faq: FaqService,
     private readonly reservations: ReservationService,
     private readonly orders: OrderService,
+    private readonly complaints: ComplaintService,
+    private readonly reviews: ReviewService,
+    private readonly carts: CartService,
   ) {}
 
   private async resolve(slug: string): Promise<string> {
@@ -106,15 +113,16 @@ export class DinerController {
       idempotencyKey?: string;
     },
   ) {
+    if (!body.idempotencyKey) {
+      throw new BadRequestException('idempotencyKey is required');
+    }
     const tenantId = await this.resolve(slug);
     return this.orders.checkout(tenantId, {
       branchId: body.branchId,
       orderType: body.orderType ?? 'pickup',
       lines: body.lines,
+      idempotencyKey: body.idempotencyKey,
       ...(body.dinerPhone !== undefined ? { dinerPhone: body.dinerPhone } : {}),
-      ...(body.idempotencyKey !== undefined
-        ? { idempotencyKey: body.idempotencyKey }
-        : {}),
     });
   }
 
@@ -126,6 +134,97 @@ export class DinerController {
     const tracking = await this.orders.getOrder(await this.resolve(slug), orderId);
     if (!tracking) throw new NotFoundException('unknown order');
     return tracking;
+  }
+
+  @Post('complaints')
+  async submitComplaint(
+    @Param('slug') slug: string,
+    @Body()
+    body: { subject: string; body: string; branchId?: string; dinerPhone?: string },
+  ) {
+    if (!body.subject || !body.body) {
+      throw new BadRequestException('subject and body are required');
+    }
+    const tenantId = await this.resolve(slug);
+    return this.complaints.capture(tenantId, {
+      subject: body.subject,
+      body: body.body,
+      ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
+      ...(body.dinerPhone !== undefined ? { dinerPhone: body.dinerPhone } : {}),
+    });
+  }
+
+  @Post('reviews')
+  async submitReview(
+    @Param('slug') slug: string,
+    @Body() body: { orderId: string; rating: number; comment?: string },
+  ) {
+    if (!body.orderId) throw new BadRequestException('orderId is required');
+    const tenantId = await this.resolve(slug);
+    return this.reviews.submit(tenantId, {
+      orderId: body.orderId,
+      rating: body.rating,
+      ...(body.comment !== undefined ? { comment: body.comment } : {}),
+    });
+  }
+
+  // ── Persistent cart (server-side quote is authoritative) ───────────────────
+  @Post('carts')
+  async createCart(
+    @Param('slug') slug: string,
+    @Body() body: { branchId: string },
+  ) {
+    if (!body.branchId) throw new BadRequestException('branchId is required');
+    return this.carts.createCart(await this.resolve(slug), body.branchId);
+  }
+
+  @Post('carts/:cartId/items')
+  async addToCart(
+    @Param('slug') slug: string,
+    @Param('cartId') cartId: string,
+    @Body() body: CheckoutLine,
+  ) {
+    return this.carts.addItem(await this.resolve(slug), cartId, body);
+  }
+
+  @Get('carts/:cartId/quote')
+  async cartQuote(
+    @Param('slug') slug: string,
+    @Param('cartId') cartId: string,
+    @Query('deliveryFeeMinor') deliveryFeeMinor = '0',
+  ) {
+    return this.carts.quote(
+      await this.resolve(slug),
+      cartId,
+      Number(deliveryFeeMinor) || 0,
+    );
+  }
+
+  @Post('carts/:cartId/checkout')
+  async checkoutCart(
+    @Param('slug') slug: string,
+    @Param('cartId') cartId: string,
+    @Body()
+    body: {
+      branchId: string;
+      orderType?: 'delivery' | 'pickup' | 'dinein';
+      dinerPhone?: string;
+      idempotencyKey?: string;
+      deliveryFeeMinor?: number;
+    },
+  ) {
+    if (!body.idempotencyKey) {
+      throw new BadRequestException('idempotencyKey is required');
+    }
+    return this.carts.checkout(await this.resolve(slug), cartId, {
+      branchId: body.branchId,
+      orderType: body.orderType ?? 'pickup',
+      idempotencyKey: body.idempotencyKey,
+      ...(body.dinerPhone !== undefined ? { dinerPhone: body.dinerPhone } : {}),
+      ...(body.deliveryFeeMinor !== undefined
+        ? { deliveryFeeMinor: body.deliveryFeeMinor }
+        : {}),
+    });
   }
 
   @Get('widget')

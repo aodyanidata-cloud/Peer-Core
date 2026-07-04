@@ -24,6 +24,8 @@ export class DeliveryService {
     if (!Number.isInteger(earningMinor) || earningMinor < 0) {
       throw new Error('earning must be a non-negative integer (minor units)');
     }
+    // One delivery + one earning per order — a second assign REASSIGNS (replaces
+    // the driver and earning) rather than double-counting.
     return this.tenancy.runAs(tenantId, async (tx) => {
       const [delivery] = await tx
         .insert(schema.deliveries)
@@ -33,13 +35,27 @@ export class DeliveryService {
           driverName: driver.name,
           driverPhone: driver.phone,
         })
+        .onConflictDoUpdate({
+          target: schema.deliveries.orderId,
+          set: {
+            driverName: driver.name,
+            driverPhone: driver.phone,
+            status: 'assigned',
+          },
+        })
         .returning();
-      await tx.insert(schema.driverEarnings).values({
-        tenantId,
-        driverPhone: driver.phone,
-        orderId,
-        amountMinor: earningMinor,
-      });
+      await tx
+        .insert(schema.driverEarnings)
+        .values({
+          tenantId,
+          driverPhone: driver.phone,
+          orderId,
+          amountMinor: earningMinor,
+        })
+        .onConflictDoUpdate({
+          target: schema.driverEarnings.orderId,
+          set: { driverPhone: driver.phone, amountMinor: earningMinor },
+        });
       return delivery;
     });
   }

@@ -39,6 +39,10 @@ export class OrderError extends Error {
       | 'unavailable'
       | 'bad_modifier'
       | 'bad_promo'
+      | 'below_minimum'
+      | 'closed'
+      | 'bad_schedule'
+      | 'conflict'
       | 'illegal_transition',
   ) {
     super(message);
@@ -65,8 +69,29 @@ export interface CheckoutInput {
 
 interface ModifierGroup {
   name: string;
+  minSelect?: number;
+  maxSelect?: number;
+  required?: boolean;
   options: { name: string; priceDeltaMinor: number }[];
 }
+
+/** Windows are [ "HH:MM", "HH:MM" ] per lowercase weekday. */
+type Hours = Record<string, [string, string][]>;
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+function isOpenAt(hours: Hours, at: Date): boolean {
+  const day = WEEKDAYS[at.getUTCDay()];
+  const windows = hours[day];
+  if (!windows || windows.length === 0) return false;
+  const hhmm = `${String(at.getUTCHours()).padStart(2, '0')}:${String(
+    at.getUTCMinutes(),
+  ).padStart(2, '0')}`;
+  return windows.some(([open, close]) =>
+    close > open ? hhmm >= open && hhmm < close : hhmm >= open || hhmm < close,
+  );
+}
+
+const SCHEDULE_HORIZON_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
 
 /**
  * OrderService — checkout + two-phase money lifecycle (R2 🔴).
@@ -105,9 +130,42 @@ export class OrderService {
         if (existing) return existing; // dedupe: one order per key
       }
 
+      if (input.lines.length === 0) {
+        throw new OrderError('cannot place an empty order', 'bad_item');
+      }
       const { priceLines, snapshots } = await this.resolveLines(tx, input.lines);
       const deliveryFee = input.deliveryFeeMinor ?? 0;
       const base = computeTotals(priceLines, deliveryFee, 0);
+
+      // ── Checkout guardrails (BRD §6.3) ──────────────────────────────────
+      const [branch] = await tx
+        .select({
+          hours: schema.branches.hours,
+          minOrderMinor: schema.branches.minOrderMinor,
+        })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, input.branchId))
+        .limit(1);
+      if (!branch) throw new OrderError('unknown branch', 'bad_item');
+
+      if (base.subtotalMinor < branch.minOrderMinor) {
+        throw new OrderError('order is below the branch minimum', 'below_minimum');
+      }
+      const nowMs = Date.now();
+      if (input.scheduledFor) {
+        const t = input.scheduledFor.getTime();
+        if (t < nowMs - 60_000) {
+          throw new OrderError('scheduled time is in the past', 'bad_schedule');
+        }
+        if (t > nowMs + SCHEDULE_HORIZON_MS) {
+          throw new OrderError('scheduled time is too far out', 'bad_schedule');
+        }
+      }
+      const when = input.scheduledFor ?? new Date();
+      const hours = (branch.hours ?? {}) as Hours;
+      if (Object.keys(hours).length > 0 && !isOpenAt(hours, when)) {
+        throw new OrderError('the branch is closed at that time', 'closed');
+      }
 
       // Resolve a promotion (if any) against the server-computed subtotal.
       let discountMinor = 0;
@@ -295,12 +353,32 @@ export class OrderService {
       const groups =
         ((item.attributes ?? {}) as { modifierGroups?: ModifierGroup[] })
           .modifierGroups ?? [];
+      const countByGroup = new Map<string, number>();
       const modifiers: PricedModifier[] = (line.modifiers ?? []).map((sel) => {
         const group = groups.find((g) => g.name === sel.group);
         const option = group?.options.find((o) => o.name === sel.option);
         if (!option) throw new OrderError('unknown modifier', 'bad_modifier');
+        countByGroup.set(sel.group, (countByGroup.get(sel.group) ?? 0) + 1);
         return { name: option.name, priceDeltaMinor: option.priceDeltaMinor };
       });
+      // Enforce each group's min/max/required at ORDER time (not just authoring).
+      for (const g of groups) {
+        const n = countByGroup.get(g.name) ?? 0;
+        const min = g.required ? Math.max(1, g.minSelect ?? 0) : g.minSelect ?? 0;
+        const max = g.maxSelect ?? g.options.length;
+        if (n < min) {
+          throw new OrderError(
+            `"${item.name}": choose at least ${min} from "${g.name}"`,
+            'bad_modifier',
+          );
+        }
+        if (n > max) {
+          throw new OrderError(
+            `"${item.name}": choose at most ${max} from "${g.name}"`,
+            'bad_modifier',
+          );
+        }
+      }
       priceLines.push({
         unitPriceMinor: item.priceMinor,
         quantity: line.quantity,
@@ -420,11 +498,21 @@ export class OrderService {
       });
     }
 
+    // Optimistic lock: only transition if the status is still what we read.
+    // If a concurrent transition already moved it, no row matches → conflict.
     const [updated] = await tx
       .update(schema.orders)
       .set({ status: to, paymentStatus })
-      .where(eq(schema.orders.id, order.id))
+      .where(
+        and(
+          eq(schema.orders.id, order.id),
+          eq(schema.orders.status, order.status),
+        ),
+      )
       .returning();
+    if (!updated) {
+      throw new OrderError('order changed concurrently', 'conflict');
+    }
     await tx.insert(schema.orderEvents).values({
       tenantId,
       orderId: order.id,
