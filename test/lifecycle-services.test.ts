@@ -113,7 +113,7 @@ d('lifecycle services (R1.9/R1.10/R1.11/R1.13)', () => {
       .where(eq(schema.memberships.tenantId, res.tenantId));
     expect(memberships).toHaveLength(1);
     expect(memberships[0].role).toBe('owner');
-    const ctx = { userId: res.ownerUserId, phone: '+966500000009', memberships: [{ tenantId: res.tenantId, role: 'owner' as const }] };
+    const ctx = { userId: res.ownerUserId, phone: '+966500000009', isPlatformAdmin: false, memberships: [{ tenantId: res.tenantId, role: 'owner' as const }] };
     expect(auth.authorizeTenant(ctx, res.tenantId, ['owner'])).toBe(res.tenantId);
   });
 });

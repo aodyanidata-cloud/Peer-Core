@@ -26,6 +26,7 @@ import { CartService } from './cart.service';
 import { DeliveryService } from './delivery.service';
 import { TenantResolver } from './tenant-resolver';
 import { DinerController } from './diner.controller';
+import { AdminController } from './admin.controller';
 
 /**
  * RestaurantsModule — the Restaurants vertical (R1 + R2). A plug-in on the
@@ -42,7 +43,7 @@ import { DinerController } from './diner.controller';
     NotificationsModule,
     IdentityModule,
   ],
-  controllers: [DinerController, StaffController],
+  controllers: [DinerController, StaffController, AdminController],
   providers: [
     RestaurantService,
     MenuService,

@@ -83,6 +83,23 @@ export const memberships = pgTable(
   }),
 );
 
+/**
+ * Platform admins — the super-admin plane. A user listed here is a PLATFORM
+ * operator (not tied to any single tenant): they run the admin portal that
+ * oversees every restaurant, payments, and verticals. Auth-plane, not
+ * tenant-scoped, so no RLS — reached only through the auth service.
+ */
+export const platformAdmins = pgTable('platform_admins', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const otpChallenges = pgTable('otp_challenges', {
   id: uuid('id').primaryKey().defaultRandom(),
   phone: text('phone').notNull(),

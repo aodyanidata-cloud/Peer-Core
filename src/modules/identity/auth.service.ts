@@ -200,7 +200,31 @@ export class AuthService {
       )
       .map((r) => ({ tenantId: r.tenantId, role: r.role }));
 
-    return { userId: user.id, phone: user.phone, memberships };
+    const [admin] = await this.db
+      .select({ id: schema.platformAdmins.id })
+      .from(schema.platformAdmins)
+      .where(eq(schema.platformAdmins.userId, user.id))
+      .limit(1);
+
+    return {
+      userId: user.id,
+      phone: user.phone,
+      memberships,
+      isPlatformAdmin: Boolean(admin),
+    };
+  }
+
+  /** Mark a user (by phone) a platform super-admin. Admin-plane; used by seeding/ops. */
+  async grantPlatformAdmin(phone: string): Promise<void> {
+    const [user] = await this.db
+      .insert(schema.users)
+      .values({ phone })
+      .onConflictDoUpdate({ target: schema.users.phone, set: { phone } })
+      .returning({ id: schema.users.id });
+    await this.db
+      .insert(schema.platformAdmins)
+      .values({ userId: user.id })
+      .onConflictDoNothing({ target: schema.platformAdmins.userId });
   }
 
   async revokeSession(token: string): Promise<void> {

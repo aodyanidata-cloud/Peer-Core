@@ -30,6 +30,7 @@ d('tool dispatcher (authority boundary)', () => {
   const ctx: AuthContext = {
     userId,
     phone: '+966500000001',
+    isPlatformAdmin: false,
     memberships: [{ tenantId: tenantA, role: 'staff' }],
   };
 

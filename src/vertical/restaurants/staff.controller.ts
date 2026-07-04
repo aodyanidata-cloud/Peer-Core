@@ -296,14 +296,17 @@ const CONSOLE_HTML = `<!doctype html><html lang="en"><meta charset="utf-8">
 <body><div class="wrap">
   <header><h1>Staff Console</h1><span class="badge">Peers · Order queue</span></header>
   <div class="tokrow">
-    <input id="tok" placeholder="Paste staff session token…" autocomplete="off">
+    <input id="tok" placeholder="Session token (auto-filled after sign-in)…" autocomplete="off">
     <button onclick="load()">Load queue</button>
+    <button class="ghost" onclick="location.href='/api/v1/auth/login'">Sign in</button>
   </div>
-  <div id="out"><div class="empty">Enter a session token and load the queue.</div></div>
+  <div id="out"><div class="empty">Sign in, or paste a session token, then load the queue.</div></div>
 </div>
 <script>
 const NEXT = { NEW:['accept','reject'], ACCEPTED:['PREPARING'], PREPARING:['READY'], READY:['OUT_FOR_DELIVERY','PICKED_UP'], OUT_FOR_DELIVERY:['DELIVERED'], DELIVERED:['COMPLETE'], PICKED_UP:['COMPLETE'] };
 function hdr(){ return { 'Authorization':'Bearer '+document.getElementById('tok').value.trim(), 'Content-Type':'application/json' }; }
+// Auto-fill the token saved by the sign-in page, and load immediately.
+(function(){ const t=localStorage.getItem('peers_token'); if(t){ document.getElementById('tok').value=t; load(); } })();
 function money(m,c){ return (m/100).toFixed(2)+' '+c; }
 async function act(id, verb){
   const url = verb==='accept'||verb==='reject' ? '/api/v1/staff/orders/'+id+'/'+verb : '/api/v1/staff/orders/'+id+'/advance';

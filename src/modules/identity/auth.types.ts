@@ -16,6 +16,8 @@ export interface AuthContext {
   userId: string;
   phone: string;
   memberships: Membership[];
+  /** True when the user is a platform operator (super-admin), from platform_admins. */
+  isPlatformAdmin: boolean;
 }
 
 export class AuthError extends Error {

@@ -9,6 +9,8 @@ import { MenuService } from '../src/vertical/restaurants/menu.service';
 import { OnboardingService } from '../src/vertical/restaurants/onboarding.service';
 import { OrderService } from '../src/vertical/restaurants/order.service';
 import { FakePaymentProvider } from '../src/modules/payments/fake-payment-provider';
+import { AuthService } from '../src/modules/identity/auth.service';
+import { LoggingOtpSender } from '../src/modules/identity/otp-sender';
 
 /**
  * Demo seed — stand up one restaurant with a menu and a couple of live orders so
@@ -18,6 +20,7 @@ import { FakePaymentProvider } from '../src/modules/payments/fake-payment-provid
  */
 const SLUG = 'demo-grill';
 const OWNER_PHONE = '+966500000000';
+const ADMIN_PHONE = '+966500000001';
 
 async function main(): Promise<void> {
   loadDotEnv();
@@ -40,6 +43,10 @@ async function main(): Promise<void> {
   const menu = new MenuService(tenancy, new CatalogService(tenancy));
   const onboarding = new OnboardingService(restaurants);
   const orders = new OrderService(tenancy, new FakePaymentProvider());
+  const auth = new AuthService(db, new LoggingOtpSender());
+
+  // A platform super-admin who can sign into the admin portal.
+  await auth.grantPlatformAdmin(ADMIN_PHONE);
 
   const { tenantId, branchId } = await onboarding.onboard({
     name: 'Demo Grill',
@@ -111,13 +118,13 @@ async function main(): Promise<void> {
   console.log(`
 Seeded demo restaurant "Demo Grill".
 
-  Diner menu widget : /api/v1/r/${SLUG}/widget
-  Staff console     : /api/v1/staff/console
-  Owner login phone : ${OWNER_PHONE}
+  Sign in          : /api/v1/auth/login
+  Admin portal     : /api/v1/admin/console   (login phone ${ADMIN_PHONE})
+  Staff console    : /api/v1/staff/console    (login phone ${OWNER_PHONE})
+  Diner menu widget: /api/v1/r/${SLUG}/widget  (no login)
 
-Two pickup/delivery orders are waiting in the staff queue.
-To sign in to the console, request an OTP for the owner phone — with no SMS
-provider wired locally, the code is printed to the server logs.
+Two orders are waiting in the staff queue. Sign in at the URL above — with no
+SMS provider wired locally, the OTP code is printed to the server logs.
 `);
 }
 
