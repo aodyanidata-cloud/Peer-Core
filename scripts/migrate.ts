@@ -1,10 +1,12 @@
 import { Pool } from 'pg';
 import { applyMigrations } from '../src/db/migrate';
+import { loadDotEnv } from '../src/load-env';
 
 /**
  * Apply SQL migrations from ./drizzle to DATABASE_URL.
  */
 async function main(): Promise<void> {
+  loadDotEnv();
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error('DATABASE_URL is not set');

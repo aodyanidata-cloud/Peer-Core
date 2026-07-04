@@ -11,17 +11,46 @@ that engine + Restaurants vertical are built in.
 TypeScript strict · NestJS (Fastify) · PostgreSQL + Drizzle · REST under `/api/v1`.
 
 ## Getting started
+### Prerequisites
+- **Node.js ≥ 22**
+- **PostgreSQL 16** running locally
+
+### 1. Create the database + a non-superuser role
+Row-level security is FORCEd, and a Postgres **superuser bypasses RLS** — so the app connects
+as a normal role, not `postgres`:
+```sh
+sudo -u postgres psql <<'SQL'
+CREATE ROLE app_user LOGIN PASSWORD 'app_pass';
+CREATE DATABASE peers_restaurants OWNER app_user;
+SQL
+```
+
+### 2. Configure and run
 ```sh
 npm install
-cp .env.example .env        # fill in DATABASE_URL, PORT
-npm run typecheck           # tsc, zero errors
-npm run build               # nest build
-npm start                   # boots on :$PORT — GET /api/v1/health -> {"status":"ok"}
-npm test                    # vitest: health e2e + safety-suite harness
-npm run fitness             # mechanical architecture guards
+cp .env.example .env         # DATABASE_URL is loaded automatically at startup
+npm run db:migrate           # create the tables
+npm run seed                 # optional: a demo restaurant + menu + a few orders
+npm run start:dev            # boots on :$PORT (dev, auto-reload)
 ```
-A database is only needed once tenant-scoped work lands (B1); the app boots and the health
-check passes without one.
+Then open:
+- `GET /api/v1/health` → `{"status":"ok"}`
+- Diner menu widget → `/api/v1/r/demo-grill/widget` (after seeding)
+- Staff console → `/api/v1/staff/console`
+
+Other commands:
+```sh
+npm run typecheck            # tsc, zero errors
+npm run build && npm start   # production-style run
+npm test                     # vitest: unit + e2e + safety-suite harness
+npm run fitness              # mechanical architecture guards
+```
+The `.env` file is loaded by the app and the `db:migrate`/`seed` scripts via Node's built-in
+env-file support; real environment variables take precedence over it.
+
+**WSL note:** run everything (Node *and* Postgres) inside WSL, or everything on Windows — don't
+split them, or `localhost` and environment variables won't line up across the boundary. In WSL,
+start Postgres each session with `sudo service postgresql start`.
 
 ## Layout
 ```
