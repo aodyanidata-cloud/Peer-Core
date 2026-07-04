@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { TenancyService } from '../../modules/tenancy/tenancy.service';
 import { CatalogService } from '../../modules/catalog/catalog.service';
+import { ValidationError } from '../../common/validation-error';
 
 export interface ModifierOption {
   name: string;
@@ -30,22 +31,22 @@ export interface NewMenuItem {
 /** Validate modifier groups: min/max sane, options integer deltas, required consistency. */
 export function validateModifierGroups(groups: ModifierGroup[]): void {
   for (const g of groups) {
-    if (!g.name) throw new Error('modifier group needs a name');
+    if (!g.name) throw new ValidationError('modifier group needs a name', 'bad_modifier');
     if (!Number.isInteger(g.minSelect) || !Number.isInteger(g.maxSelect)) {
-      throw new Error(`modifier group "${g.name}": min/max must be integers`);
+      throw new ValidationError(`modifier group "${g.name}": min/max must be integers`, 'bad_modifier');
     }
     if (g.minSelect < 0 || g.maxSelect < g.minSelect) {
-      throw new Error(`modifier group "${g.name}": require 0 <= min <= max`);
+      throw new ValidationError(`modifier group "${g.name}": require 0 <= min <= max`, 'bad_modifier');
     }
     if (g.maxSelect > g.options.length) {
-      throw new Error(`modifier group "${g.name}": max exceeds option count`);
+      throw new ValidationError(`modifier group "${g.name}": max exceeds option count`, 'bad_modifier');
     }
     if (g.required && g.minSelect < 1) {
-      throw new Error(`modifier group "${g.name}": required needs min >= 1`);
+      throw new ValidationError(`modifier group "${g.name}": required needs min >= 1`, 'bad_modifier');
     }
     for (const o of g.options) {
       if (!Number.isInteger(o.priceDeltaMinor)) {
-        throw new Error(`modifier "${o.name}": priceDeltaMinor must be an integer`);
+        throw new ValidationError(`modifier "${o.name}": priceDeltaMinor must be an integer`, 'bad_modifier');
       }
     }
   }

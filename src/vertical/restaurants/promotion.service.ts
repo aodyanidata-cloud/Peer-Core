@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { TenancyService } from '../../modules/tenancy/tenancy.service';
+import { ValidationError } from '../../common/validation-error';
 
 /**
  * PromotionService — merchant-owned voucher/discount engine (R2 §11A). The
@@ -23,7 +24,7 @@ export class PromotionService {
     },
   ) {
     if (input.kind === 'percent' && (input.value < 0 || input.value > 100)) {
-      throw new Error('percent value must be 0–100');
+      throw new ValidationError('percent value must be 0–100', 'bad_promo');
     }
     return this.tenancy.runAs(tenantId, async (tx) => {
       const [row] = await tx

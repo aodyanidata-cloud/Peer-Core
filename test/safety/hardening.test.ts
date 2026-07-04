@@ -48,7 +48,7 @@ d('hardening: modifier enforcement, checkout guards, optimistic lock, OTP rate-l
 
   beforeEach(async () => {
     await pool.query(
-      'TRUNCATE payments, order_events, order_items, orders, catalog_items, branches, otp_challenges, sessions, users, tenants RESTART IDENTITY CASCADE',
+      'TRUNCATE payments, order_events, order_items, orders, menu_availability, catalog_items, branches, otp_challenges, sessions, users, tenants RESTART IDENTITY CASCADE',
     );
     await db.insert(schema.tenants).values({ id: tenantA, slug: 'a-' + tenantA.slice(0, 8), name: 'A' });
     const b = await restaurant.createBranch(tenantA, { name: 'Main' });
@@ -179,5 +179,67 @@ d('hardening: modifier enforcement, checkout guards, optimistic lock, OTP rate-l
     await auth.requestOtp(phone);
     await expect(auth.requestOtp(phone)).rejects.toMatchObject({ code: 'otp_locked' });
     expect(sender.count).toBe(3);
+  });
+
+  it('holds the OTP cap under CONCURRENCY (no TOCTOU bypass)', async () => {
+    const sender = new CapturingOtp();
+    const auth = new AuthService(db, sender);
+    const phone = '+966500000199';
+    // Fire many in parallel: a count-then-insert race would let all through.
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, () => auth.requestOtp(phone)),
+    );
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    expect(ok).toBe(3); // never more than the cap
+    expect(sender.count).toBe(3);
+    const rows = await db
+      .select({ id: schema.otpChallenges.id })
+      .from(schema.otpChallenges)
+      .where(eq(schema.otpChallenges.phone, phone));
+    expect(rows).toHaveLength(3); // and only 3 codes were ever persisted
+  });
+
+  it('evaluates branch hours in KSA-local time, not UTC', async () => {
+    const hours: Record<string, [string, string][]> = Object.fromEntries(
+      ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map((d2) => [d2, [['09:00', '17:00'] as [string, string]]]),
+    );
+    await withTenant(db, tenantA, (tx) =>
+      tx.update(schema.branches).set({ hours }).where(eq(schema.branches.id, branchId)),
+    );
+    // 08:00 UTC = 11:00 KSA → OPEN (a UTC evaluation would wrongly call it closed).
+    const openUtc = new Date(Date.now() + 2 * 86400_000);
+    openUtc.setUTCHours(8, 0, 0, 0);
+    const ok = await co({ scheduledFor: openUtc });
+    expect(ok.status).toBe('NEW');
+    // 15:00 UTC = 18:00 KSA → CLOSED (a UTC evaluation would wrongly call it open).
+    const closedUtc = new Date(Date.now() + 2 * 86400_000);
+    closedUtc.setUTCHours(15, 0, 0, 0);
+    await expect(co({ scheduledFor: closedUtc })).rejects.toMatchObject({ code: 'closed' });
+  });
+
+  it('blocks ordering an item 86ed at the branch, even if globally available', async () => {
+    await menu.setBranchAvailability(tenantA, plainId, branchId, false);
+    await expect(co()).rejects.toMatchObject({ code: 'unavailable' });
+    await menu.setBranchAvailability(tenantA, plainId, branchId, true);
+    const ok = await co();
+    expect(ok.status).toBe('NEW');
+  });
+
+  it('captures at most once under concurrent accept — money op is behind the lock', async () => {
+    const o = await co();
+    const results = await Promise.allSettled([
+      orders.accept(tenantA, o.id),
+      orders.accept(tenantA, o.id),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    // Exactly one capture row exists — the loser never reached the money op.
+    const caps = await withTenant(db, tenantA, (tx) =>
+      tx
+        .select()
+        .from(schema.payments)
+        .where(and(eq(schema.payments.orderId, o.id), eq(schema.payments.action, 'capture'))),
+    );
+    expect(caps).toHaveLength(1);
   });
 });

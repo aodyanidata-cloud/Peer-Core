@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull, sql } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Db } from '../tenancy/tenant-context';
 import {
@@ -52,66 +52,95 @@ export class AuthService {
       throw new AuthError('phone must be E.164', 'invalid_phone');
     }
     // Rate-limit code requests per phone (SMS-bomb / cost-abuse guard).
-    const windowStart = new Date(this.now().getTime() - OTP_REQUEST_WINDOW_MS);
-    const recent = await this.db
-      .select({ id: schema.otpChallenges.id })
-      .from(schema.otpChallenges)
-      .where(
-        and(
-          eq(schema.otpChallenges.phone, phone),
-          gte(schema.otpChallenges.createdAt, windowStart),
-        ),
-      );
-    if (recent.length >= OTP_MAX_REQUESTS) {
-      throw new AuthError('too many code requests; try again later', 'otp_locked');
-    }
+    // Count-then-insert is a TOCTOU race: concurrent requests could each read
+    // count < max and all insert. A transaction-scoped advisory lock keyed on
+    // the phone serializes requests for the SAME phone, so the check and insert
+    // are atomic and the window cap actually holds under concurrency.
     const code = generateOtpCode();
-    await this.db.insert(schema.otpChallenges).values({
-      phone,
-      codeHash: hashSecret(code),
-      expiresAt: new Date(this.now().getTime() + OTP_TTL_MS),
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`);
+      const windowStart = new Date(this.now().getTime() - OTP_REQUEST_WINDOW_MS);
+      const recent = await tx
+        .select({ id: schema.otpChallenges.id })
+        .from(schema.otpChallenges)
+        .where(
+          and(
+            eq(schema.otpChallenges.phone, phone),
+            gte(schema.otpChallenges.createdAt, windowStart),
+          ),
+        );
+      if (recent.length >= OTP_MAX_REQUESTS) {
+        throw new AuthError('too many code requests; try again later', 'otp_locked');
+      }
+      await tx.insert(schema.otpChallenges).values({
+        phone,
+        codeHash: hashSecret(code),
+        expiresAt: new Date(this.now().getTime() + OTP_TTL_MS),
+      });
     });
+    // Send only after the challenge is durably committed.
     await this.sender.send(phone, code);
   }
 
   async verifyOtp(phone: string, code: string): Promise<VerifyResult> {
-    const [challenge] = await this.db
-      .select()
-      .from(schema.otpChallenges)
-      .where(
-        and(
-          eq(schema.otpChallenges.phone, phone),
-          isNull(schema.otpChallenges.consumedAt),
-        ),
-      )
-      .orderBy(desc(schema.otpChallenges.createdAt))
-      .limit(1);
+    // Serialize the challenge accounting per-phone so concurrent verifies can't
+    // read the same `attempts` and each get a guess past the cap, and can't
+    // both consume the same challenge (double-use). The transaction RETURNS a
+    // decision rather than throwing, so the attempt increment commits even when
+    // the code is wrong (brute-force stays bounded); the throw happens after.
+    const outcome = await this.db.transaction(
+      async (
+        tx,
+      ): Promise<'no_code' | 'locked' | 'bad_code' | 'ok'> => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`);
+        const [challenge] = await tx
+          .select()
+          .from(schema.otpChallenges)
+          .where(
+            and(
+              eq(schema.otpChallenges.phone, phone),
+              isNull(schema.otpChallenges.consumedAt),
+            ),
+          )
+          .orderBy(desc(schema.otpChallenges.createdAt))
+          .limit(1);
 
-    if (!challenge) {
+        if (!challenge || challenge.expiresAt.getTime() <= this.now().getTime()) {
+          return 'no_code';
+        }
+        if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
+          return 'locked';
+        }
+
+        // Count this attempt before checking, so brute-force is bounded. This
+        // update is committed regardless of whether the code is correct.
+        await tx
+          .update(schema.otpChallenges)
+          .set({ attempts: challenge.attempts + 1 })
+          .where(eq(schema.otpChallenges.id, challenge.id));
+
+        if (!verifySecret(code, challenge.codeHash)) {
+          return 'bad_code';
+        }
+
+        // Single-use: consume the challenge inside the locked transaction.
+        await tx
+          .update(schema.otpChallenges)
+          .set({ consumedAt: this.now() })
+          .where(eq(schema.otpChallenges.id, challenge.id));
+        return 'ok';
+      },
+    );
+
+    if (outcome === 'no_code') {
       throw new AuthError('no active code', 'invalid_otp');
     }
-    if (challenge.expiresAt.getTime() <= this.now().getTime()) {
-      throw new AuthError('code expired', 'invalid_otp');
-    }
-    if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
+    if (outcome === 'locked') {
       throw new AuthError('too many attempts', 'otp_locked');
     }
-
-    // Count this attempt before checking, so brute-force is bounded.
-    await this.db
-      .update(schema.otpChallenges)
-      .set({ attempts: challenge.attempts + 1 })
-      .where(eq(schema.otpChallenges.id, challenge.id));
-
-    if (!verifySecret(code, challenge.codeHash)) {
+    if (outcome === 'bad_code') {
       throw new AuthError('incorrect code', 'invalid_otp');
     }
-
-    // Single-use: consume the challenge.
-    await this.db
-      .update(schema.otpChallenges)
-      .set({ consumedAt: this.now() })
-      .where(eq(schema.otpChallenges.id, challenge.id));
 
     const [user] = await this.db
       .insert(schema.users)

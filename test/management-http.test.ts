@@ -216,6 +216,37 @@ d('management + diner self-service over HTTP', () => {
     expect(res.body.error.code).toBe('order_not_complete');
   });
 
+  it('returns 400 (not 500) for invalid input on reachable routes', async () => {
+    // Bad promo percent → 400 bad_promo, not a leaked 500.
+    const promo = await auth(
+      supertest(app.getHttpServer()).post('/api/v1/staff/promotions'),
+    ).send({ code: 'BAD', kind: 'percent', value: 150 });
+    expect(promo.status).toBe(400);
+    expect(promo.body.error.code).toBe('bad_promo');
+
+    // Bad modifier group config on menu create → 400 bad_modifier.
+    const item = await auth(
+      supertest(app.getHttpServer()).post('/api/v1/staff/menu/items'),
+    ).send({
+      name: 'Broken',
+      priceMinor: 1000,
+      modifierGroups: [{ name: 'Size', minSelect: 3, maxSelect: 1, required: false, options: [] }],
+    });
+    expect(item.status).toBe(400);
+    expect(item.body.error.code).toBe('bad_modifier');
+
+    // Bad rating on the public diner review route → 400 bad_rating.
+    const menuRes = await supertest(app.getHttpServer()).get(`/api/v1/r/${slug}/menu`);
+    const place = await supertest(app.getHttpServer())
+      .post(`/api/v1/r/${slug}/orders`)
+      .send({ branchId, orderType: 'pickup', lines: [{ itemId: menuRes.body[0].id, quantity: 2 }], idempotencyKey: 'badrev-ord' });
+    const review = await supertest(app.getHttpServer())
+      .post(`/api/v1/r/${slug}/reviews`)
+      .send({ orderId: place.body.id, rating: 9 });
+    expect(review.status).toBe(400);
+    expect(review.body.error.code).toBe('bad_rating');
+  });
+
   it('runs a diner cart end-to-end over HTTP (create → add → quote → checkout)', async () => {
     // A fresh in-stock item for the cart (the seed Falafel is still available).
     const menuRes = await supertest(app.getHttpServer()).get(`/api/v1/r/${slug}/menu`);

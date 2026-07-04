@@ -14,8 +14,11 @@ CREATE POLICY memberships_dual ON memberships
   USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id())
   WITH CHECK (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
 
--- Driver ledger: one delivery + one earning per order (dedup / reassign semantics).
--- Postgres treats NULLs as distinct in a UNIQUE index, so settled rows whose
--- order_id was nulled don't collide.
+-- Driver ledger: one delivery + one earning per order (dedup / reassign
+-- semantics). A reassign REPLACES the still-open earning via upsert; the app
+-- guards that upsert with `settled = false`, so a settled earning is closed
+-- history and is never rewritten. Postgres treats NULLs as distinct in a UNIQUE
+-- index, so if an order is deleted (FK sets order_id NULL) the orphaned earning
+-- rows don't collide.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_deliveries_order ON deliveries (order_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_driver_earnings_order ON driver_earnings (order_id);

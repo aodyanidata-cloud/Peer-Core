@@ -14,6 +14,7 @@ const DOMAIN_ERRORS = new Set([
   'AuthError',
   'ReservationError',
   'ReviewError',
+  'ValidationError',
 ]);
 
 /** code → HTTP status. Anything unlisted from a domain error is a 400. */

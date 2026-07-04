@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { TenancyService } from '../../modules/tenancy/tenancy.service';
+import { ValidationError } from '../../common/validation-error';
 
 export interface NewBranch {
   name: string;
@@ -67,7 +68,7 @@ export class RestaurantService {
       patch.minOrderMinor !== undefined &&
       (!Number.isInteger(patch.minOrderMinor) || patch.minOrderMinor < 0)
     ) {
-      throw new Error('minOrderMinor must be a non-negative integer (minor units)');
+      throw new ValidationError('minOrderMinor must be a non-negative integer (minor units)');
     }
     return this.tenancy.runAs(tenantId, async (tx) => {
       const [row] = await tx
@@ -89,7 +90,7 @@ export class RestaurantService {
 
   async addTable(tenantId: string, input: NewTable) {
     if (!Number.isInteger(input.capacity) || input.capacity <= 0) {
-      throw new Error('table capacity must be a positive integer');
+      throw new ValidationError('table capacity must be a positive integer');
     }
     return this.tenancy.runAs(tenantId, async (tx) => {
       const [row] = await tx

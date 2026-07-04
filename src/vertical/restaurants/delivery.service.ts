@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { TenancyService } from '../../modules/tenancy/tenancy.service';
+import { ValidationError } from '../../common/validation-error';
 
 export type DeliveryStatus = 'assigned' | 'picked_up' | 'delivered' | 'failed';
 
@@ -22,7 +23,7 @@ export class DeliveryService {
     earningMinor: number,
   ) {
     if (!Number.isInteger(earningMinor) || earningMinor < 0) {
-      throw new Error('earning must be a non-negative integer (minor units)');
+      throw new ValidationError('earning must be a non-negative integer (minor units)');
     }
     // One delivery + one earning per order — a second assign REASSIGNS (replaces
     // the driver and earning) rather than double-counting.
@@ -55,6 +56,9 @@ export class DeliveryService {
         .onConflictDoUpdate({
           target: schema.driverEarnings.orderId,
           set: { driverPhone: driver.phone, amountMinor: earningMinor },
+          // Never rewrite a SETTLED earning — that row is closed history.
+          // A reassign only replaces the still-open (unsettled) earning.
+          setWhere: eq(schema.driverEarnings.settled, false),
         });
       return delivery;
     });

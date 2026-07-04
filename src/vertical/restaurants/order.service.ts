@@ -78,13 +78,19 @@ interface ModifierGroup {
 /** Windows are [ "HH:MM", "HH:MM" ] per lowercase weekday. */
 type Hours = Record<string, [string, string][]>;
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+// Branch hours are merchant-entered LOCAL wall-clock times. The platform is
+// KSA-only (Asia/Riyadh = UTC+3, no DST), so evaluate the guard in that offset
+// rather than UTC — otherwise every branch's hours are wrong by 3 hours.
+const BRANCH_TZ_OFFSET_MIN = 180;
 
-function isOpenAt(hours: Hours, at: Date): boolean {
-  const day = WEEKDAYS[at.getUTCDay()];
+function isOpenAt(hours: Hours, at: Date, offsetMinutes = BRANCH_TZ_OFFSET_MIN): boolean {
+  // Shift the instant by the branch offset, then read UTC fields → local wall-clock.
+  const local = new Date(at.getTime() + offsetMinutes * 60_000);
+  const day = WEEKDAYS[local.getUTCDay()];
   const windows = hours[day];
   if (!windows || windows.length === 0) return false;
-  const hhmm = `${String(at.getUTCHours()).padStart(2, '0')}:${String(
-    at.getUTCMinutes(),
+  const hhmm = `${String(local.getUTCHours()).padStart(2, '0')}:${String(
+    local.getUTCMinutes(),
   ).padStart(2, '0')}`;
   return windows.some(([open, close]) =>
     close > open ? hhmm >= open && hhmm < close : hhmm >= open || hhmm < close,
@@ -133,7 +139,11 @@ export class OrderService {
       if (input.lines.length === 0) {
         throw new OrderError('cannot place an empty order', 'bad_item');
       }
-      const { priceLines, snapshots } = await this.resolveLines(tx, input.lines);
+      const { priceLines, snapshots } = await this.resolveLines(
+        tx,
+        input.lines,
+        input.branchId,
+      );
       const deliveryFee = input.deliveryFeeMinor ?? 0;
       const base = computeTotals(priceLines, deliveryFee, 0);
 
@@ -337,6 +347,7 @@ export class OrderService {
   private async resolveLines(
     tx: Parameters<Parameters<TenancyService['runAs']>[1]>[0],
     lines: CheckoutLine[],
+    branchId?: string,
   ) {
     const priceLines = [];
     const snapshots: { itemId: string; name: string }[] = [];
@@ -349,6 +360,23 @@ export class OrderService {
       if (!item) throw new OrderError('unknown item', 'bad_item');
       if (item.status !== 'available') {
         throw new OrderError(`${item.name} is unavailable`, 'unavailable');
+      }
+      // Per-branch "86": an explicit availability override to false at this
+      // branch gates ordering even when the item is globally available.
+      if (branchId) {
+        const [override] = await tx
+          .select({ available: schema.menuAvailability.available })
+          .from(schema.menuAvailability)
+          .where(
+            and(
+              eq(schema.menuAvailability.itemId, line.itemId),
+              eq(schema.menuAvailability.branchId, branchId),
+            ),
+          )
+          .limit(1);
+        if (override && !override.available) {
+          throw new OrderError(`${item.name} is unavailable at this branch`, 'unavailable');
+        }
       }
       const groups =
         ((item.attributes ?? {}) as { modifierGroups?: ModifierGroup[] })
@@ -483,10 +511,28 @@ export class OrderService {
       );
     }
 
-    let paymentStatus = order.paymentStatus;
+    // Optimistic lock FIRST — claim the transition before moving any money.
+    // Only one concurrent path can flip status = old → new; the loser matches
+    // no row and stops here, so the money op below runs at most once and never
+    // races a second capture. Because everything is in one tx, a later failure
+    // (e.g. the PSP call throwing) rolls the claimed transition back too.
+    const [claimed] = await tx
+      .update(schema.orders)
+      .set({ status: to })
+      .where(
+        and(
+          eq(schema.orders.id, order.id),
+          eq(schema.orders.status, order.status),
+        ),
+      )
+      .returning();
+    if (!claimed) {
+      throw new OrderError('order changed concurrently', 'conflict');
+    }
+
+    let updated = claimed;
     if (money && order.paymentRef) {
       const intent = await this.payments[money](order.paymentRef);
-      paymentStatus = intent.status;
       await tx.insert(schema.payments).values({
         tenantId,
         orderId: order.id,
@@ -496,22 +542,12 @@ export class OrderService {
         providerRef: order.paymentRef,
         status: intent.status,
       });
-    }
-
-    // Optimistic lock: only transition if the status is still what we read.
-    // If a concurrent transition already moved it, no row matches → conflict.
-    const [updated] = await tx
-      .update(schema.orders)
-      .set({ status: to, paymentStatus })
-      .where(
-        and(
-          eq(schema.orders.id, order.id),
-          eq(schema.orders.status, order.status),
-        ),
-      )
-      .returning();
-    if (!updated) {
-      throw new OrderError('order changed concurrently', 'conflict');
+      const [repriced] = await tx
+        .update(schema.orders)
+        .set({ paymentStatus: intent.status })
+        .where(eq(schema.orders.id, order.id))
+        .returning();
+      updated = repriced ?? { ...claimed, paymentStatus: intent.status };
     }
     await tx.insert(schema.orderEvents).values({
       tenantId,

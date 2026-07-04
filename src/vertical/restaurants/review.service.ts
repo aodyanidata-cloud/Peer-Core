@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { TenancyService } from '../../modules/tenancy/tenancy.service';
+import { ValidationError } from '../../common/validation-error';
 
 export class ReviewError extends Error {
   constructor(
@@ -26,7 +27,7 @@ export class ReviewService {
     input: { orderId: string; rating: number; comment?: string },
   ) {
     if (!Number.isInteger(input.rating) || input.rating < 1 || input.rating > 5) {
-      throw new Error('rating must be an integer 1–5');
+      throw new ValidationError('rating must be an integer 1–5', 'bad_rating');
     }
     return this.tenancy.runAs(tenantId, async (tx) => {
       const [order] = await tx
